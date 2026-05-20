@@ -1,6 +1,7 @@
 import ffmpeg_mcp.ffmpeg as ffmpeg
 import ffmpeg_mcp.utils as utils
 import os
+import shlex
 from typing import List
 from enum import Enum
 
@@ -26,7 +27,7 @@ def clip_video_ffmpeg(video_path, start = None, end = None, duration=None, outpu
         base, ext = os.path.splitext(video_path)
         if (output_path == None):
             output_path = f"{base}_clip{ext}"
-        cmd = f"-i {video_path} "
+        cmd = f"-i {shlex.quote(video_path)} "
         if (start != None):
             start_sec = utils.convert_to_seconds(start)
             cmd = f"{cmd} -ss {start_sec}"
@@ -35,7 +36,7 @@ def clip_video_ffmpeg(video_path, start = None, end = None, duration=None, outpu
         if (end != None):
             end_sec = utils.convert_to_seconds(end) 
             cmd = f"{cmd} -to {end_sec}"
-        cmd = f"{cmd} -y {output_path}"
+        cmd = f"{cmd} -y {shlex.quote(output_path)}"
         print(cmd)
         status_code, log = ffmpeg.run_ffmpeg(cmd, timeout=time_out)
         print(log)
@@ -85,7 +86,7 @@ def concat_videos(input_files: List[str], output_path: str = None,
                         f.write(f"file '{abs_path}'\n")
             
             # 构建FFmpeg命令
-            cmd = f"-f concat -safe 0 -i {temp_list_file} -c copy -y {output_path}"
+            cmd = f"-f concat -safe 0 -i {shlex.quote(temp_list_file)} -c copy -y {shlex.quote(output_path)}"
             return ffmpeg.run_ffmpeg(cmd)
         finally:
             # 清理临时文件
@@ -104,7 +105,7 @@ def concat_videos(input_files: List[str], output_path: str = None,
             height = fmt_ctx.video_streams[0].height
             aspect = float(width)/float(height)
             for i, file in enumerate(input_files):
-                inputs.extend(["-i", file])
+                inputs.extend(["-i", shlex.quote(file)])
                 if i == 0:
                     filter_str += f"[{i}:v]setsar=1[{i}v];"
                 if i > 0:
@@ -139,8 +140,7 @@ def concat_videos(input_files: List[str], output_path: str = None,
             filter_str += f"concat=n={len(input_files)}:v=1:a={a}{out}"
         elif len(fmt_ctx.audio_streams) > 0: # 音频
             for i, file in enumerate(input_files):
-                inputs.extend(["-i", file])
-                filter_str += f"[{i}:a]"
+                inputs.extend(["-i", shlex.quote(file)])
             filter_str += f"concat=n={len(input_files)}:a=1:v=0[outa]"
             map = " -map '[outa]' "
             
@@ -148,12 +148,12 @@ def concat_videos(input_files: List[str], output_path: str = None,
             return -1, f"{input_files[0]} 视频中不包含任何音视频流！！"
         # 构建输入参数和滤镜表达式
         inputs_str = " ".join(inputs)
-        cmd = f" {inputs_str} -lavfi '{filter_str}' {map} -y {output_path}"
+        cmd = f" {inputs_str} -lavfi '{filter_str}' {map} -y {shlex.quote(output_path)}"
         return ffmpeg.run_ffmpeg(cmd)
     
 
 def get_video_info(video_path: str):
-    cmd = f" -v error -show_streams -of json -i {video_path}"
+    cmd = f" -v error -show_streams -of json -i {shlex.quote(video_path)}"
     return ffmpeg.run_ffprobe(cmd, timeout=60)
         
         
@@ -172,7 +172,7 @@ def video_play(video_path: str, speed, loop):
             audio_filter_str = f"-af atempo={speed}"
         if len(fmt_ctx.video_streams) > 0:
             video_filter_str = f"-vf setpts={1/speed}*PTS"
-    cmd = f" {cmd } {audio_filter_str} {video_filter_str}   -i {video_path}"
+    cmd = f" {cmd } {audio_filter_str} {video_filter_str}   -i {shlex.quote(video_path)}"
     print(cmd)
     return ffmpeg.run_ffplay(cmd, timeout=60)
         
@@ -236,8 +236,8 @@ def overlay_video(background_video, overlay_video, output_path: str = None, posi
             x = f"(W-w)/2+{dx}"
             y = f"(H-h)/2+{dy}"   
             
-        cmd = f" -i {background_video} -i {overlay_video} -filter_complex \"[0:v][1:v]overlay=x={x}:y={y}[ov];[0:a][1:a]amix=inputs=2:weights='3 1'[oa]\" -map '[ov]' -map '[oa]'"
-        cmd = f"{cmd} -y {output_path}"
+        cmd = f" -i {shlex.quote(background_video)} -i {shlex.quote(overlay_video)} -filter_complex \"[0:v][1:v]overlay=x={x}:y={y}[ov];[0:a][1:a]amix=inputs=2:weights='3 1'[oa]\" -map '[ov]' -map '[oa]'"
+        cmd = f"{cmd} -y {shlex.quote(output_path)}"
         print(cmd)
         status_code, log = ffmpeg.run_ffmpeg(cmd, timeout=1000)
         print(log)
@@ -263,8 +263,8 @@ def scale_video(video_path, width, height = -2,output_path: str = None):
                 ext = ".mp4"
             output_path = f"{base}_clip{ext}"
     
-        cmd = f" -i {video_path} -filter_complex \"scale={width}:{height}\""
-        cmd = f"{cmd} -y {output_path}"
+        cmd = f" -i {shlex.quote(video_path)} -filter_complex \"scale={width}:{height}\""
+        cmd = f"{cmd} -y {shlex.quote(output_path)}"
         print(cmd)
         status_code, log = ffmpeg.run_ffmpeg(cmd, timeout=1000)
         print(log)
@@ -297,7 +297,7 @@ def extract_frames_from_video(video_path,fps=0, output_folder=None, format=0, to
         img_ext = "webp"
     output_path = os.path.join(output_folder, f'frame_%04d.{img_ext}')
     try:
-        cmd = f" -i {video_path}"
+        cmd = f" -i {shlex.quote(video_path)}"
         # 执行 FFmpeg 命令
         if fps > 0:
             cmd = f" {cmd} -vf 'fps=1/{fps}'"
@@ -305,7 +305,7 @@ def extract_frames_from_video(video_path,fps=0, output_folder=None, format=0, to
             cmd = f" {cmd} -vsync 0"
         if (total_frames > 0):
             cmd = f" {cmd} -vframes {total_frames} "
-        cmd = f" {cmd} -y {output_path}"
+        cmd = f" {cmd} -y {shlex.quote(output_path)}"
         status_code, log = ffmpeg.run_ffmpeg(cmd, timeout=1000)
         print(log)
         return {status_code, log, output_path}
