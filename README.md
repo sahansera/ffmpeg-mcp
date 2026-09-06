@@ -1,57 +1,94 @@
 # FFmpeg-MCP
-Using ffmpeg command line to achieve an mcp server, can be very convenient, through the dialogue to achieve the local video search, tailoring, stitching, playback and other functions
 
-<a href="https://glama.ai/mcp/servers/@video-creator/ffmpeg-mcp">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@video-creator/ffmpeg-mcp/badge" alt="FFmpeg-Server MCP server" />
-</a>
+An MCP server that uses the local FFmpeg command line for video search, inspection, clipping, concatenation, playback, overlays, scaling, and frame extraction.
 
-## Support Tools
-The server implements the following tools: <br/>
-- `find_video_path`
-  The parameters are directory and file name, file name can be complete, or is not suffixed, recursive search in the directory, return the full path
-- `get_video_info`
-  The parameters are video path, return the video info, linkes duration/fps/codec/width/height.
-- `clip_video`
-  The parameter is the file path, start time, end time or duration, and returns the trimmed file path
-- `concat_videos`
-  The parameters are the list of files, the output path, and if the video elements in the list of files, such as width, height, frame rate, etc., are consistent, quick mode synthesis is automatically used
-- `play_video`
-  Play video/audio with ffplay, support many format, like mov/mp4/avi/mkv/3gp, video_path: video path speed: play rate loop: play count
-- `overlay_video`
-  Two video overlay. <br/>
-  background_video: backgroud video path <br/>
-  overlay_video: front video path <br/>
-  output_path: output video path<br/>
-  position: relative location<br/>
-  dx: x offset<br/>
-  dy: y offset<br/>
-- `scale_video`
-  Video scale. <br/>
-  video_path: in video path <br/>
-  width: out video width, -2 keep aspect <br/>
-  height: out video height, -2 keep aspect <br/>
-  output_path: output video path <br/>
-- `extract_frames_from_video`
-  Extract images from a video.<br/>
-  Parameters: <br/>
-  video_path (str): The path to the video.<br/>
-  fps (int): Extract one frame every specified number of seconds. If set to 0, extract all frames; if set to 1, extract one frame per second.<br/>
-  output_folder (str): The directory where the images will be saved.<br/>
-  format (int): The format of the extracted images; 0: PNG, 1: JPG, 2: WEBP.<br/>
-  total_frames (int): The maximum number of frames to extract. If set to 0, there is no limit<br/>
-<br/>
-More features are coming
+This repository is a fork of [`video-creator/ffmpeg-mcp`](https://github.com/video-creator/ffmpeg-mcp) with additional work focused on reliable use from **LM Studio**, especially for long-running and 4K/HEVC operations.
 
-## Installation procedure
-1. Download project
-```
-git clone  https://github.com/video-creator/ffmpeg-mcp.git
+## LM Studio improvements in this fork
+
+- FFmpeg subprocess timeouts are configurable and timed-out processes are terminated cleanly.
+- The server prefers an explicitly configured or system-installed FFmpeg before falling back to the bundled build.
+- Ordinary clipping defaults to FFmpeg stream copy (`-c copy`) so 4K/HEVC clips do not need to be decoded and re-encoded.
+- Seeking is performed before the input where appropriate.
+- Frame-accurate clipping can use macOS VideoToolbox hardware acceleration, with a software fallback.
+- Frame extraction attempts VideoToolbox decoding on macOS and falls back automatically.
+- Tool descriptions explicitly tell local models that FFmpeg runs on the host machine rather than inside the model inference sandbox.
+
+## Supported tools
+
+- `find_video_path` — recursively find a local video by name.
+- `get_video_info` — inspect duration, FPS, codec, width, height, and stream information with ffprobe.
+- `clip_video` — trim a video using either fast stream copy or frame-accurate transcoding.
+- `concat_videos` — concatenate compatible files quickly or normalize them when required.
+- `play_video` — play local media with ffplay.
+- `overlay_video` — overlay one video on another.
+- `scale_video` — resize a video.
+- `extract_frames_from_video` — extract selected or all frames.
+
+## Installation
+
+```bash
+git clone https://github.com/sahansera/ffmpeg-mcp.git
 cd ffmpeg-mcp
 uv sync
 ```
 
-2. Configuration in Cline
+FFmpeg-MCP will prefer FFmpeg available from your `PATH`. On Apple Silicon it also checks `/opt/homebrew/bin`; on Intel macOS it checks `/usr/local/bin`. If no system installation can be found, the upstream bundled macOS FFmpeg fallback is retained.
+
+You can explicitly select binaries with environment variables:
+
+```bash
+export FFMPEG_PATH=/opt/homebrew/bin/ffmpeg
+export FFPROBE_PATH=/opt/homebrew/bin/ffprobe
+export FFPLAY_PATH=/opt/homebrew/bin/ffplay
 ```
+
+The server-side default FFmpeg timeout can also be changed:
+
+```bash
+export FFMPEG_MCP_TIMEOUT=1200
+```
+
+The value is in **seconds**.
+
+## LM Studio configuration
+
+LM Studio's `mcp.json` `timeout` value is in **milliseconds**. A 20-minute tool-call timeout is therefore `1200000`.
+
+```json
+{
+  "mcpServers": {
+    "ffmpeg-mcp": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/Users/YOUR_USER/Projects/ffmpeg-mcp",
+        "run",
+        "ffmpeg-mcp"
+      ],
+      "timeout": 1200000
+    }
+  }
+}
+```
+
+Replace the directory with the actual local path to this repository. After changing the configuration, save `mcp.json` and restart the MCP server in LM Studio.
+
+### Clipping behavior
+
+`clip_video` now exposes these additional controls:
+
+- `fast=true` (default): uses `-c copy`. This is recommended for normal clipping and is especially useful for 4K HEVC files. Because stream copy does not re-encode, a start position can be limited by source keyframe placement.
+- `fast=false`: performs a frame-accurate transcode. On macOS, `hardware_acceleration=true` attempts VideoToolbox first and falls back to software if required.
+- `time_out=1200`: FFmpeg process timeout in seconds. This is separate from LM Studio's MCP timeout.
+
+For example, a model should normally call a simple five-second clip with `fast=true` rather than assuming a 4K/HEVC source is too expensive to process.
+
+## Cline configuration
+
+The upstream project was originally documented for Cline. A typical Cline configuration remains:
+
+```json
 {
   "mcpServers": {
     "ffmpeg-mcp": {
@@ -61,7 +98,7 @@ uv sync
       "command": "uv",
       "args": [
         "--directory",
-        "/Users/xxx/Downloads/ffmpeg-mcp",
+        "/Users/YOUR_USER/Projects/ffmpeg-mcp",
         "run",
         "ffmpeg-mcp"
       ],
@@ -70,7 +107,21 @@ uv sync
   }
 }
 ```
-Note: the value:`/Users/XXX/Downloads/ffmpeg` in args  need to replace the actual download ffmpeg-mcp directory
+
+Client timeout units and semantics are client-specific; the LM Studio example above intentionally uses milliseconds.
+
+## Development
+
+Run the tests with:
+
+```bash
+uv run python -m unittest discover -s tests -v
+```
 
 ## Supported platforms
-Currently, only macos platforms are supported, including ARM64 or x86_64
+
+The upstream bundled-binary fallback currently supports macOS ARM64 and x86_64. System FFmpeg discovery makes the execution layer less dependent on the bundled binary, but this fork is currently tested primarily with macOS in mind.
+
+## License and attribution
+
+MIT licensed. This fork retains the original license and copyright notice from `video-creator/ffmpeg-mcp`.
